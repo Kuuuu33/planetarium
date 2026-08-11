@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="プラネタリウム">
+<meta name="theme-color" content="#02030a">
+<title>プラネタリウム</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden; background: #000;
+    touch-action: manipulation;            /* ダブルタップ拡大を無効化 */
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;             /* 引っ張って更新を防ぐ */
+  }
+  #sky { display: block; width: 100vw; height: 100vh; height: 100dvh; cursor: none; }
+  body.ui-visible #sky { cursor: default; }
+
+  /* コントロールパネル */
+  #panel {
+    position: fixed; z-index: 10;
+    top: calc(16px + env(safe-area-inset-top));
+    left: calc(16px + env(safe-area-inset-left));
+    max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    background: rgba(8, 12, 28, 0.82);
+    border: 1px solid rgba(120, 150, 220, 0.35);
+    border-radius: 14px;
+    padding: 16px 18px;
+    color: #cdd8ff;
+    font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
+    font-size: 13px;
+    width: 268px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+    user-select: none;
+  }
+  body:not(.ui-visible) #panel { opacity: 0; transform: translateY(-8px); pointer-events: none; }
+  #panel h1 { font-size: 15px; font-weight: 600; margin-bottom: 12px; letter-spacing: 0.05em; color: #eaf0ff; }
+  #panel h1 span { font-size: 11px; opacity: 0.6; font-weight: 400; }
+  .row { display: flex; align-items: center; justify-content: space-between; margin: 9px 0; gap: 8px; }
+  .row label { flex: 0 0 auto; opacity: 0.85; }
+  .row .val { font-variant-numeric: tabular-nums; opacity: 0.7; min-width: 54px; text-align: right; }
+  input[type=range] { flex: 1; accent-color: #8ea8ff; height: 4px; }
+  select, input[type=number] {
+    background: rgba(20,28,52,0.9); color: #cdd8ff;
+    border: 1px solid rgba(120,150,220,0.3); border-radius: 6px;
+    padding: 4px 6px; font-size: 12px; font-family: inherit;
+  }
+  .toggles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .toggle {
+    flex: 1 1 44%; text-align: center; padding: 6px 4px; border-radius: 8px;
+    border: 1px solid rgba(120,150,220,0.3); cursor: pointer;
+    transition: all 0.2s; font-size: 12px; background: rgba(20,28,52,0.5);
+  }
+  .toggle.on { background: rgba(110,140,240,0.35); border-color: rgba(150,180,255,0.7); color: #fff; }
+  #fsBtn { width: 100%; margin-top: 12px; padding: 9px; border-radius: 9px; cursor: pointer;
+    background: linear-gradient(135deg,#4a63c8,#6d4ac8); color:#fff; border:none; font-size:13px; font-family:inherit; font-weight:600; }
+  #fsBtn:hover { filter: brightness(1.12); }
+  .hint { margin-top: 11px; font-size: 11px; opacity: 0.5; line-height: 1.5; }
+  hr { border: none; border-top: 1px solid rgba(120,150,220,0.2); margin: 12px 0; }
+
+  #clock {
+    position: fixed; z-index: 5;
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    right: calc(22px + env(safe-area-inset-right));
+    color: rgba(200,215,255,0.55); font-family: -apple-system, sans-serif;
+    font-size: 13px; font-variant-numeric: tabular-nums; letter-spacing: 0.05em;
+    transition: opacity 0.4s; text-align: right; line-height: 1.5;
+    pointer-events: none;
+  }
+  body:not(.ui-visible) #clock { opacity: 0.25; }
+
+  /* 一時メッセージ */
+  #toast {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(44px + env(safe-area-inset-bottom)); z-index: 20;
+    background: rgba(8,12,28,0.92); color: #cdd8ff;
+    border: 1px solid rgba(120,150,220,0.35); border-radius: 10px;
+    padding: 12px 18px; font-size: 13px; line-height: 1.6;
+    font-family: -apple-system, "Hiragino Sans", sans-serif;
+    max-width: min(90vw, 340px); text-align: center;
+    opacity: 0; transition: opacity 0.4s; pointer-events: none;
+    backdrop-filter: blur(10px);
+  }
+  #toast.show { opacity: 1; }
+
+  /* ===== スマホ・小さい画面 ===== */
+  @media (max-width: 600px) {
+    #panel {
+      width: calc(100vw - 24px); max-width: 320px;
+      top: calc(12px + env(safe-area-inset-top));
+      left: calc(12px + env(safe-area-inset-left));
+      padding: 12px 14px; font-size: 13px;
+      /* 画面を覆い尽くさないよう高さを制限（超えた分はスクロール） */
+      max-height: min(68dvh, calc(100dvh - 24px - env(safe-area-inset-top)));
+    }
+    #panel h1 { font-size: 14px; margin-bottom: 10px; }
+    .row { margin: 8px 0; }
+    hr { margin: 10px 0; }
+    /* タップ領域は確保しつつ詰める */
+    .toggle { padding: 9px 4px; font-size: 12.5px; }
+    #fsBtn { padding: 11px; font-size: 13px; margin-top: 10px; }
+    select, input[type=number] { padding: 6px 8px; font-size: 13px; }
+    input[type=range] { height: 20px; }
+    .hint { font-size: 10.5px; margin-top: 8px; }
+    #clock { font-size: 12px; right: calc(14px + env(safe-area-inset-right)); }
+  }
+  /* 横向きで画面が低いとき：パネルを詰める */
+  @media (max-height: 460px) {
+    #panel { padding: 10px 12px; font-size: 12px; }
+    #panel h1 { margin-bottom: 8px; font-size: 13px; }
+    .row { margin: 6px 0; }
+    hr { margin: 8px 0; }
+    .toggle { padding: 7px 4px; }
+  }
+</style>
+</head>
+<body class="ui-visible">
+<canvas id="sky"></canvas>
+
+<div id="panel">
+  <h1>プラネタリウム <span>PLANETARIUM</span></h1>
+
+  <div class="row">
+    <label>場所</label>
+    <select id="location"></select>
+  </div>
+  <div class="row">
+    <label>緯度</label>
+    <input type="number" id="lat" step="0.5" style="width:70px"> <span style="opacity:.5">°N</span>
+  </div>
+  <div class="row">
+    <label>経度</label>
+    <input type="number" id="lon" step="0.5" style="width:70px"> <span style="opacity:.5">°E</span>
+  </div>
+
+  <hr>
+
+  <div class="row">
+    <label>時間の速さ</label>
+    <span class="val" id="speedVal">停止</span>
+  </div>
+  <input type="range" id="speed" min="0" max="8" step="1" value="0" style="width:100%">
+  <div class="row" style="margin-top:4px">
+    <label>星の明るさ</label>
+    <span class="val" id="brightVal">100%</span>
+  </div>
+  <input type="range" id="bright" min="40" max="180" step="5" value="100" style="width:100%">
+
+  <hr>
+
+  <div class="row">
+    <label>🎵 ヒーリング音楽</label>
+    <span class="val" id="musicState">オフ</span>
+  </div>
+  <div class="toggles" style="margin-bottom:2px">
+    <div class="toggle" id="musicToggle" style="flex:1 1 100%">♪ 音楽を再生</div>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <label>音量</label>
+    <span class="val" id="volVal">55%</span>
+  </div>
+  <input type="range" id="volume" min="0" max="100" step="5" value="55" style="width:100%">
+
+  <hr>
+
+  <div class="toggles">
+    <div class="toggle on" data-t="starnames">星の名前</div>
+    <div class="toggle on" data-t="lines">星座線</div>
+    <div class="toggle on" data-t="names">星座名</div>
+    <div class="toggle on" data-t="milkyway">天の川</div>
+    <div class="toggle on" data-t="meteors">流れ星</div>
+    <div class="toggle" data-t="cardinal">方角</div>
+    <div class="toggle" data-t="ground">地平線</div>
+  </div>
+
+  <button id="fsBtn">🔭 全画面で投影</button>
+  <div class="hint">Hキー: パネル表示/非表示 ・ Fキー: 全画面<br>マウスを止めると自動で隠れます</div>
+</div>
+
+<div id="clock"></div>
+<div id="toast"></div>
+
+<script>
+(function(){
+"use strict";
+
+// ============================================================
+//  端末判定（スマホでは描画負荷を軽くする）
+// ============================================================
+const IS_TOUCH = ("ontouchstart" in window) || (navigator.maxTouchPoints||0) > 0;
+const IS_SMALL = Math.min(screen.width, screen.height) < 640;
+// 全画面APIが使えるか（iOS Safariは非対応）
+const FS_SUPPORTED = !!(document.documentElement.requestFullscreen
+                     || document.documentElement.webkitRequestFullscreen);
+// ホーム画面から起動した状態か（iOSはこれで既に全画面）
+const IS_STANDALONE = window.navigator.standalone === true
+                   || window.matchMedia("(display-mode: standalone)").matches;
+
+// ============================================================
+//  恒星カタログ（実際の主要な明るい星）
+//  ra: 赤経(時), dec: 赤緯(度), mag: 等級, name: 固有名
+// ============================================================
+const STARS = [
+  // Orion オリオン座
+  {k:"betelgeuse", ra:5.919, dec:7.407, mag:0.45, name:"ベテルギウス"},
+  {k:"rigel",      ra:5.242, dec:-8.202, mag:0.18, name:"リゲル"},
+  {k:"bellatrix",  ra:5.418, dec:6.350, mag:1.64},
+  {k:"mintaka",    ra:5.533, dec:-0.299, mag:2.25},
+  {k:"alnilam",    ra:5.604, dec:-1.202, mag:1.69},
+  {k:"alnitak",    ra:5.679, dec:-1.943, mag:1.74},
+  {k:"saiph",      ra:5.796, dec:-9.670, mag:2.07},
+  {k:"ori_eta",    ra:5.408, dec:-2.397, mag:3.36},
+  // Canis Major おおいぬ座
+  {k:"sirius",     ra:6.752, dec:-16.716, mag:-1.46, name:"シリウス"},
+  {k:"adhara",     ra:6.977, dec:-28.972, mag:1.50},
+  {k:"wezen",      ra:7.140, dec:-26.393, mag:1.83},
+  {k:"mirzam",     ra:6.378, dec:-17.956, mag:1.98},
+  {k:"aludra",     ra:7.402, dec:-29.303, mag:2.45},
+  // Canis Minor こいぬ座
+  {k:"procyon",    ra:7.655, dec:5.225, mag:0.34, name:"プロキオン"},
+  {k:"gomeisa",    ra:7.452, dec:8.289, mag:2.89},
+  // Taurus おうし座
+  {k:"aldebaran",  ra:4.599, dec:16.509, mag:0.87, name:"アルデバラン"},
+  {k:"elnath",     ra:5.438, dec:28.608, mag:1.65},
+  {k:"tau_zeta",   ra:5.627, dec:21.143, mag:3.00},
+  {k:"tau_lambda", ra:4.011, dec:12.490, mag:3.41},
+  // Gemini ふたご座
+  {k:"pollux",     ra:7.755, dec:28.026, mag:1.14, name:"ポルックス"},
+  {k:"castor",     ra:7.577, dec:31.888, mag:1.58, name:"カストル"},
+  {k:"alhena",     ra:6.629, dec:16.399, mag:1.90},
+  {k:"gem_mu",     ra:6.383, dec:22.514, mag:2.87},
+  {k:"gem_eps",    ra:6.732, dec:25.131, mag:2.98},
+  // Auriga ぎょしゃ座
+  {k:"capella",    ra:5.278, dec:45.998, mag:0.08, name:"カペラ"},
+  {k:"menkalinan", ra:5.992, dec:44.947, mag:1.90},
+  {k:"aur_theta",  ra:5.995, dec:37.213, mag:2.62},
+  {k:"aur_iota",   ra:4.950, dec:33.166, mag:2.69},
+  // Ursa Major おおぐま座（北斗七星）
+  {k:"dubhe",      ra:11.062, dec:61.751, mag:1.79},
+  {k:"merak",      ra:11.031, dec:56.383, mag:2.37},
+  {k:"phecda",     ra:11.897, dec:53.695, mag:2.44},
+  {k:"megrez",     ra:12.257, dec:57.033, mag:3.31},
+  {k:"alioth",     ra:12.900, dec:55.960, mag:1.77},
+  {k:"mizar",      ra:13.399, dec:54.925, mag:2.27, name:"ミザール"},
+  {k:"alkaid",     ra:13.792, dec:49.313, mag:1.86},
+  // Ursa Minor こぐま座
+  {k:"polaris",    ra:2.530, dec:89.264, mag:1.98, name:"北極星"},
+  {k:"kochab",     ra:14.845, dec:74.156, mag:2.08},
+  {k:"pherkad",    ra:15.345, dec:71.834, mag:3.05},
+  // Cassiopeia カシオペヤ座
+  {k:"schedar",    ra:0.675, dec:56.537, mag:2.24},
+  {k:"caph",       ra:0.153, dec:59.150, mag:2.28},
+  {k:"cas_gamma",  ra:0.945, dec:60.717, mag:2.47},
+  {k:"ruchbah",    ra:1.430, dec:60.235, mag:2.68},
+  {k:"segin",      ra:1.907, dec:63.670, mag:3.35},
+  // Cepheus ケフェウス座
+  {k:"alderamin",  ra:21.309, dec:62.585, mag:2.45},
+  {k:"cep_beta",   ra:21.478, dec:70.561, mag:3.23},
+  {k:"cep_gamma",  ra:23.656, dec:77.632, mag:3.21},
+  // Leo しし座
+  {k:"regulus",    ra:10.139, dec:11.967, mag:1.36, name:"レグルス"},
+  {k:"denebola",   ra:11.818, dec:14.572, mag:2.14},
+  {k:"algieba",    ra:10.333, dec:19.842, mag:2.08},
+  {k:"zosma",      ra:11.235, dec:20.524, mag:2.56},
+  {k:"leo_eta",    ra:10.278, dec:16.763, mag:3.48},
+  {k:"leo_theta",  ra:11.237, dec:15.430, mag:3.33},
+  {k:"leo_eps",    ra:9.764, dec:23.774, mag:2.98},
+  {k:"leo_mu",     ra:9.880, dec:26.007, mag:3.88},
+  // Virgo おとめ座
+  {k:"spica",      ra:13.420, dec:-11.161, mag:0.98, name:"スピカ"},
+  {k:"vindemiatrix",ra:13.036, dec:10.959, mag:2.83},
+  {k:"vir_gamma",  ra:12.694, dec:-1.449, mag:2.74},
+  {k:"vir_eps",    ra:13.036, dec:10.959, mag:2.83},
+  // Bootes うしかい座
+  {k:"arcturus",   ra:14.261, dec:19.182, mag:-0.05, name:"アークトゥルス"},
+  {k:"izar",       ra:14.750, dec:27.074, mag:2.35},
+  {k:"boo_gamma",  ra:14.534, dec:38.308, mag:3.03},
+  {k:"boo_beta",   ra:15.032, dec:40.390, mag:3.49},
+  {k:"boo_delta",  ra:15.258, dec:33.315, mag:3.47},
+  {k:"boo_rho",    ra:14.532, dec:30.371, mag:3.58},
+  // Corona Borealis かんむり座
+  {k:"alphecca",   ra:15.578, dec:26.715, mag:2.22},
+  // Leo/Cancer かに座
+  {k:"cnc_beta",   ra:8.275, dec:9.186, mag:3.53},
+  {k:"cnc_delta",  ra:8.745, dec:18.154, mag:3.94},
+  // Scorpius さそり座
+  {k:"antares",    ra:16.490, dec:-26.432, mag:1.06, name:"アンタレス"},
+  {k:"shaula",     ra:17.560, dec:-37.104, mag:1.62},
+  {k:"sco_beta",   ra:16.090, dec:-19.805, mag:2.62},
+  {k:"dschubba",   ra:16.005, dec:-22.622, mag:2.29},
+  {k:"sco_pi",     ra:15.981, dec:-26.114, mag:2.89},
+  {k:"sco_tau",    ra:16.598, dec:-28.216, mag:2.82},
+  {k:"sco_eps",    ra:16.836, dec:-34.293, mag:2.29},
+  {k:"sargas",     ra:17.622, dec:-42.998, mag:1.86},
+  {k:"lesath",     ra:17.513, dec:-37.296, mag:2.69},
+  // Sagittarius いて座
+  {k:"kaus_aus",   ra:18.403, dec:-34.385, mag:1.85},
+  {k:"nunki",      ra:18.921, dec:-26.297, mag:2.02},
+  {k:"kaus_media", ra:18.350, dec:-29.828, mag:2.70},
+  {k:"kaus_bor",   ra:18.466, dec:-25.421, mag:2.81},
+  {k:"sgr_phi",    ra:18.741, dec:-26.991, mag:3.17},
+  {k:"sgr_zeta",   ra:19.044, dec:-29.880, mag:2.60},
+  {k:"sgr_tau",    ra:19.115, dec:-27.670, mag:3.32},
+  // Lyra こと座
+  {k:"vega",       ra:18.616, dec:38.784, mag:0.03, name:"ベガ"},
+  {k:"sheliak",    ra:18.835, dec:33.363, mag:3.52},
+  {k:"sulafat",    ra:18.982, dec:32.690, mag:3.24},
+  {k:"lyr_zeta",   ra:18.746, dec:37.605, mag:4.36},
+  {k:"lyr_delta",  ra:18.908, dec:36.899, mag:4.30},
+  // Cygnus はくちょう座
+  {k:"deneb",      ra:20.690, dec:45.280, mag:1.25, name:"デネブ"},
+  {k:"albireo",    ra:19.512, dec:27.960, mag:3.18, name:"アルビレオ"},
+  {k:"sadr",       ra:20.371, dec:40.257, mag:2.23},
+  {k:"gienah_cyg", ra:20.770, dec:33.970, mag:2.48},
+  {k:"cyg_delta",  ra:19.749, dec:45.131, mag:2.87},
+  {k:"cyg_eps",    ra:20.770, dec:33.970, mag:2.48},
+  // Aquila わし座
+  {k:"altair",     ra:19.846, dec:8.868, mag:0.76, name:"アルタイル"},
+  {k:"tarazed",    ra:19.771, dec:10.613, mag:2.72},
+  {k:"alshain",    ra:19.921, dec:6.407, mag:3.71},
+  {k:"aql_delta",  ra:19.425, dec:3.115, mag:3.36},
+  {k:"aql_zeta",   ra:19.090, dec:13.863, mag:2.99},
+  {k:"aql_theta",  ra:20.188, dec:-0.821, mag:3.24},
+  {k:"aql_lambda", ra:19.104, dec:-4.882, mag:3.43},
+  // Pegasus ペガスス座
+  {k:"markab",     ra:23.079, dec:15.205, mag:2.49},
+  {k:"scheat",     ra:23.063, dec:28.083, mag:2.42},
+  {k:"algenib",    ra:0.220, dec:15.184, mag:2.83},
+  {k:"enif",       ra:21.736, dec:9.875, mag:2.39},
+  // Andromeda アンドロメダ座
+  {k:"alpheratz",  ra:0.140, dec:29.091, mag:2.06},
+  {k:"mirach",     ra:1.162, dec:35.621, mag:2.06},
+  {k:"almach",     ra:2.065, dec:42.330, mag:2.10},
+  // Perseus ペルセウス座
+  {k:"mirfak",     ra:3.405, dec:49.861, mag:1.79},
+  {k:"algol",      ra:3.136, dec:40.956, mag:2.09, name:"アルゴル"},
+  {k:"per_zeta",   ra:3.902, dec:31.884, mag:2.85},
+  {k:"per_eps",    ra:3.964, dec:40.010, mag:2.89},
+  {k:"per_delta",  ra:3.715, dec:47.788, mag:3.01},
+  // Aries おひつじ座
+  {k:"hamal",      ra:2.119, dec:23.463, mag:2.00},
+  {k:"sheratan",   ra:1.911, dec:20.808, mag:2.64},
+  // Piscis Austrinus みなみのうお座
+  {k:"fomalhaut",  ra:22.961, dec:-29.622, mag:1.16, name:"フォーマルハウト"},
+  // Crux / Centaurus（南天）
+  {k:"acrux",      ra:12.443, dec:-63.099, mag:0.77, name:"アクルックス"},
+  {k:"mimosa",     ra:12.795, dec:-59.689, mag:1.25},
+  {k:"gacrux",     ra:12.519, dec:-57.113, mag:1.63},
+  {k:"crux_delta", ra:12.252, dec:-58.749, mag:2.79},
+  {k:"rigil_kent", ra:14.660, dec:-60.834, mag:-0.27, name:"リギル・ケンタウルス"},
+  {k:"hadar",      ra:14.064, dec:-60.373, mag:0.61},
+  // Carina りゅうこつ座
+  {k:"canopus",    ra:6.399, dec:-52.696, mag:-0.74, name:"カノープス"},
+  // Eridanus エリダヌス座
+  {k:"achernar",   ra:1.629, dec:-57.237, mag:0.45, name:"アケルナル"},
+  // Draco りゅう座
+  {k:"eltanin",    ra:17.943, dec:51.489, mag:2.23},
+  {k:"rastaban",   ra:17.507, dec:52.301, mag:2.79},
+  {k:"dra_delta",  ra:19.209, dec:67.661, mag:3.07},
+  {k:"thuban",     ra:14.073, dec:64.376, mag:3.65},
+  // Ophiuchus へびつかい座
+  {k:"rasalhague", ra:17.582, dec:12.560, mag:2.08},
+  {k:"sabik",      ra:17.173, dec:-15.725, mag:2.43},
+  // Hydra うみへび座
+  {k:"alphard",    ra:9.460, dec:-8.659, mag:1.98, name:"アルファルド"},
+  // Grus / Pavo など南天の1等級級
+  {k:"alnair",     ra:22.137, dec:-46.961, mag:1.74},
+  {k:"peacock",    ra:20.427, dec:-56.735, mag:1.94}
+];
+
+// 名前→インデックスの索引
+const IDX = {};
+STARS.forEach((s,i)=>{ IDX[s.k]=i; });
+
+// ============================================================
+//  星座線（星のkキーのペア列）
+// ============================================================
+const CONSTELLATIONS = [
+  {name:"オリオン座", lines:[
+    ["betelgeuse","bellatrix"],["bellatrix","mintaka"],["mintaka","alnilam"],["alnilam","alnitak"],
+    ["alnitak","betelgeuse"],["betelgeuse","ori_eta"],["ori_eta","rigel"],["rigel","mintaka"],
+    ["alnitak","saiph"],["saiph","rigel"]]},
+  {name:"おおいぬ座", lines:[
+    ["sirius","mirzam"],["sirius","adhara"],["adhara","wezen"],["wezen","aludra"],["wezen","sirius"]]},
+  {name:"こいぬ座", lines:[["procyon","gomeisa"]]},
+  {name:"おうし座", lines:[
+    ["aldebaran","elnath"],["aldebaran","tau_zeta"],["aldebaran","tau_lambda"]]},
+  {name:"ふたご座", lines:[
+    ["pollux","castor"],["pollux","gem_eps"],["gem_eps","gem_mu"],["gem_mu","alhena"],
+    ["castor","gem_eps"]]},
+  {name:"ぎょしゃ座", lines:[
+    ["capella","menkalinan"],["menkalinan","aur_theta"],["aur_theta","elnath"],
+    ["elnath","aur_iota"],["aur_iota","capella"]]},
+  {name:"おおぐま座", lines:[
+    ["dubhe","merak"],["merak","phecda"],["phecda","megrez"],["megrez","dubhe"],
+    ["megrez","alioth"],["alioth","mizar"],["mizar","alkaid"]]},
+  {name:"こぐま座", lines:[
+    ["polaris","kochab"],["kochab","pherkad"]]},
+  {name:"カシオペヤ座", lines:[
+    ["caph","schedar"],["schedar","cas_gamma"],["cas_gamma","ruchbah"],["ruchbah","segin"]]},
+  {name:"ケフェウス座", lines:[
+    ["alderamin","cep_beta"],["cep_beta","cep_gamma"],["cep_gamma","alderamin"]]},
+  {name:"しし座", lines:[
+    ["regulus","leo_eta"],["leo_eta","algieba"],["algieba","leo_eps"],["leo_eps","leo_mu"],
+    ["algieba","zosma"],["zosma","denebola"],["denebola","leo_theta"],["leo_theta","regulus"],
+    ["leo_theta","zosma"]]},
+  {name:"おとめ座", lines:[
+    ["spica","vir_gamma"],["vir_gamma","vindemiatrix"]]},
+  {name:"うしかい座", lines:[
+    ["arcturus","izar"],["izar","boo_gamma"],["boo_gamma","boo_beta"],["boo_beta","boo_delta"],
+    ["boo_delta","boo_rho"],["boo_rho","arcturus"]]},
+  {name:"さそり座", lines:[
+    ["dschubba","sco_beta"],["dschubba","sco_pi"],["sco_pi","antares"],["dschubba","antares"],
+    ["antares","sco_tau"],["sco_tau","sco_eps"],["sco_eps","sargas"],["sargas","shaula"],
+    ["shaula","lesath"]]},
+  {name:"いて座", lines:[
+    ["kaus_aus","kaus_media"],["kaus_media","kaus_bor"],["kaus_bor","sgr_phi"],
+    ["sgr_phi","nunki"],["nunki","sgr_zeta"],["sgr_zeta","kaus_aus"],["sgr_phi","kaus_media"],
+    ["nunki","sgr_tau"],["sgr_tau","sgr_zeta"]]},
+  {name:"こと座", lines:[
+    ["vega","sheliak"],["sheliak","sulafat"],["sulafat","lyr_delta"],["lyr_delta","lyr_zeta"],
+    ["lyr_zeta","vega"],["lyr_zeta","sheliak"]]},
+  {name:"はくちょう座", lines:[
+    ["deneb","sadr"],["sadr","albireo"],["cyg_delta","sadr"],["sadr","gienah_cyg"]]},
+  {name:"わし座", lines:[
+    ["altair","tarazed"],["tarazed","aql_zeta"],["altair","alshain"],["altair","aql_delta"],
+    ["aql_delta","aql_lambda"],["aql_zeta","aql_theta"]]},
+  {name:"ペガスス座", lines:[
+    ["markab","scheat"],["scheat","alpheratz"],["alpheratz","algenib"],["algenib","markab"],
+    ["markab","enif"]]},
+  {name:"アンドロメダ座", lines:[
+    ["alpheratz","mirach"],["mirach","almach"]]},
+  {name:"ペルセウス座", lines:[
+    ["mirfak","algol"],["mirfak","per_delta"],["mirfak","per_eps"],["per_eps","per_zeta"],
+    ["almach","mirfak"]]},
+  {name:"おひつじ座", lines:[["hamal","sheratan"]]},
+  {name:"みなみじゅうじ座", lines:[
+    ["acrux","gacrux"],["mimosa","crux_delta"]]},
+  {name:"ケンタウルス座", lines:[["rigil_kent","hadar"]]},
+  {name:"りゅう座", lines:[
+    ["eltanin","rastaban"],["eltanin","dra_delta"],["dra_delta","thuban"]]}
+];
+
+// 星座名を表示する代表星（ラベルの位置）
+const CONST_LABELS = [
+  {t:"オリオン座", k:"alnilam"}, {t:"おおいぬ座", k:"wezen"}, {t:"ふたご座", k:"gem_eps"},
+  {t:"おうし座", k:"aldebaran"}, {t:"ぎょしゃ座", k:"aur_theta"}, {t:"北斗七星", k:"megrez"},
+  {t:"カシオペヤ座", k:"cas_gamma"}, {t:"しし座", k:"algieba"}, {t:"さそり座", k:"sco_tau"},
+  {t:"いて座", k:"kaus_media"}, {t:"こと座", k:"sulafat"}, {t:"はくちょう座", k:"sadr"},
+  {t:"わし座", k:"aql_delta"}, {t:"ペガスス座", k:"markab"}, {t:"うしかい座", k:"boo_gamma"},
+  {t:"ペルセウス座", k:"per_eps"}, {t:"みなみじゅうじ座", k:"gacrux"}
+];
+
+// 天の川の帯（銀河座標 b=0 付近を赤道座標に変換した近似ポリライン群）
+// 見た目重視の近似データ（ra時,dec度）
+const MILKYWAY = [
+  // 夏の大三角〜いて座方向（濃い中心部）
+  [[18.9,-30],[18.4,-24],[18.0,-16],[18.6,-8],[19.0,0],[19.5,8],[19.8,16],[20.3,30],[20.7,40],[20.7,45],[21.0,52],[21.5,58],[22.5,60],[23.5,60],[0.5,60],[1.0,58],[1.9,63],[2.5,60],[3.4,50],[4.5,40],[5.4,35],[6.0,25],[6.5,15],[6.8,5],[7.0,-15],[7.2,-27],[7.4,-40],[8.0,-48],[9.0,-55]],
+  [[17.5,-40],[17.9,-30],[18.0,-20],[18.3,-10],[18.9,0],[19.4,10],[20.0,25],[20.4,38],[21.3,55]]
+];
+
+// ============================================================
+//  観測地プリセット
+// ============================================================
+const LOCATIONS = [
+  {n:"東京", lat:35.68, lon:139.69},
+  {n:"大阪", lat:34.69, lon:135.50},
+  {n:"札幌", lat:43.06, lon:141.35},
+  {n:"那覇", lat:26.21, lon:127.68},
+  {n:"石垣島", lat:24.34, lon:124.16},
+  {n:"ニューヨーク", lat:40.71, lon:-74.01},
+  {n:"ロンドン", lat:51.51, lon:-0.13},
+  {n:"シドニー", lat:-33.87, lon:151.21},
+  {n:"赤道直下", lat:0.0, lon:120.0},
+  {n:"北極", lat:89.9, lon:0.0}
+];
+
+// ============================================================
+//  天文計算
+// ============================================================
+const D2R = Math.PI/180, R2D = 180/Math.PI, H2R = Math.PI/12;
+
+// グリニッジ平均恒星時（度）
+function gmst(date){
+  const jd = date.getTime()/86400000 + 2440587.5;
+  const T = (jd - 2451545.0)/36525.0;
+  let g = 280.46061837 + 360.98564736629*(jd-2451545.0)
+          + 0.000387933*T*T - T*T*T/38710000.0;
+  g = g % 360; if(g<0) g+=360;
+  return g;
+}
+// 地方恒星時（時）
+function lstHours(date, lonDeg){
+  let lst = (gmst(date) + lonDeg)/15.0;
+  lst = lst % 24; if(lst<0) lst+=24;
+  return lst;
+}
+
+// 赤道座標→地平座標。戻り値 {alt, az}（度）
+function eqToHorizon(raH, decDeg, latDeg, lstH){
+  const ha = (lstH - raH)*H2R;          // 時角(rad)
+  const dec = decDeg*D2R, lat = latDeg*D2R;
+  const sinAlt = Math.sin(dec)*Math.sin(lat) + Math.cos(dec)*Math.cos(lat)*Math.cos(ha);
+  const alt = Math.asin(Math.max(-1,Math.min(1,sinAlt)));
+  const cosAz = (Math.sin(dec) - Math.sin(alt)*Math.sin(lat)) / (Math.cos(alt)*Math.cos(lat) || 1e-9);
+  let az = Math.acos(Math.max(-1,Math.min(1,cosAz)));
+  if(Math.sin(ha) > 0) az = 2*Math.PI - az;   // 東側の補正
+  return {alt: alt*R2D, az: az*R2D};
+}
+
+// ============================================================
+//  描画セットアップ
+// ============================================================
+const canvas = document.getElementById("sky");
+const ctx = canvas.getContext("2d");
+let W=0, H=0, DPR=1, cx=0, cy=0, radius=0;
+let LBL = 1;   // 画面サイズに応じた文字の縮尺
+
+function resize(){
+  // スマホは解像度を抑えて処理を軽く
+  DPR = Math.min(window.devicePixelRatio||1, IS_SMALL ? 1.5 : 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W*DPR; canvas.height = H*DPR;
+  canvas.style.width = W+"px"; canvas.style.height = H+"px";
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  cx = W/2; cy = H/2;
+  radius = Math.min(W,H)*0.5 - 8;   // 地平線までの半径
+  LBL = Math.max(0.82, Math.min(1, radius/360));   // 小さい画面では文字も小さく
+}
+window.addEventListener("resize", resize);
+// 画面回転・アドレスバーの出入りに追従
+window.addEventListener("orientationchange", ()=>{ setTimeout(resize, 250); });
+resize();
+
+// 地平座標→画面座標（天頂中心の魚眼＝等距離射影）。
+// 見上げた天球なので東西を反転（天井投影・肉眼と同じ向き）。
+function project(altDeg, azDeg){
+  if(altDeg < -2) return null;
+  const z = (90 - altDeg)/90;             // 天頂=0, 地平=1
+  const r = radius * z;
+  const a = azDeg*D2R;
+  // 北を上(-y)、東を左向きにして見上げた空を表現
+  const x = cx - r*Math.sin(a);
+  const y = cy - r*Math.cos(a);
+  return {x, y, r};
+}
+
+// ============================================================
+//  状態
+// ============================================================
+const state = {
+  lat: 35.68, lon: 139.69,
+  baseTime: Date.now(),   // 実時刻の基準
+  simOffset: 0,           // シミュレーション経過(ms)
+  speedIdx: 0,
+  bright: 1.0,
+  show: { starnames:true, lines:true, names:true, milkyway:true, meteors:true, cardinal:false, ground:false }
+};
+const SPEEDS = [
+  {label:"停止", mult:0},
+  {label:"実時間", mult:1},
+  {label:"60倍", mult:60},
+  {label:"5分/秒", mult:300},
+  {label:"30分/秒", mult:1800},
+  {label:"1時間/秒", mult:3600},
+  {label:"6時間/秒", mult:21600},
+  {label:"1日/秒", mult:86400},
+  {label:"1週/秒", mult:604800}
+];
+
+function currentDate(){
+  return new Date(state.baseTime + state.simOffset);
+}
+
+// 各星に固有のきらめき位相
+STARS.forEach(s=>{ s._tw = Math.random()*Math.PI*2; s._tws = 0.6+Math.random()*1.6; });
+
+// ============================================================
+//  流れ星
+// ============================================================
+const meteors = [];
+function spawnMeteor(){
+  const ang = (Math.random()*0.5 - 0.25) + (Math.random()<0.5?Math.PI*0.75:Math.PI*0.25);
+  const edge = Math.random()*Math.PI*2;
+  const sx = cx + Math.cos(edge)*radius*0.9;
+  const sy = cy + Math.sin(edge)*radius*0.9 - radius*0.3;
+  const dir = Math.atan2(cy-sy, cx-sx) + (Math.random()-0.5)*1.4;
+  const speed = 9 + Math.random()*10;
+  meteors.push({
+    x:sx, y:sy, vx:Math.cos(dir)*speed, vy:Math.sin(dir)*speed,
+    life:0, maxLife: 40+Math.random()*40, len: 60+Math.random()*90,
+    w: 0.8+Math.random()*1.4
+  });
+}
+
+// ============================================================
+//  背景の微光星（装飾用のランダムなフィールド星）
+// ============================================================
+const dust = [];
+const DUST_N = IS_SMALL ? 230 : 420;   // スマホは控えめにして軽量化
+for(let i=0;i<DUST_N;i++){
+  dust.push({ ra: Math.random()*24, dec: Math.random()*180-90,
+    mag: 4.5+Math.random()*1.8, tw: Math.random()*Math.PI*2, tws:0.5+Math.random()*2 });
+}
+
+// ============================================================
+//  描画本体
+// ============================================================
+function starColor(mag){
+  // 明るい星は白〜青白、暗めは少し暖色に（簡易）
+  if(mag < 0.5) return "#dfe8ff";
+  if(mag < 1.5) return "#eef2ff";
+  if(mag < 2.5) return "#ffffff";
+  return "#f3f0ea";
+}
+function magToRadius(mag){
+  const r = 3.2 - mag*0.62;
+  return Math.max(0.5, r);
+}
+
+function drawBackground(){
+  // 夜空のグラデ（天頂は濃紺、地平付近はわずかに明るく）
+  const g = ctx.createRadialGradient(cx,cy,radius*0.1, cx,cy,radius*1.05);
+  g.addColorStop(0, "#05060f");
+  g.addColorStop(0.7, "#070a18");
+  g.addColorStop(1, "#0c1024");
+  ctx.fillStyle = "#02030a";
+  ctx.fillRect(0,0,W,H);
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,radius,0,Math.PI*2); ctx.clip();
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  ctx.restore();
+}
+
+function drawMilkyway(lstH){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,radius,0,Math.PI*2); ctx.clip();
+  ctx.lineCap = "round";
+  MILKYWAY.forEach((band, bi)=>{
+    // 帯を太い半透明ラインで
+    for(let pass=0; pass<3; pass++){
+      const width = (bi===0? 70:46) - pass*16;
+      const alpha = (bi===0? 0.055:0.04) + pass*0.02;
+      ctx.strokeStyle = `rgba(180,195,255,${alpha})`;
+      ctx.lineWidth = Math.max(6, width);
+      ctx.beginPath();
+      let started=false;
+      band.forEach(p=>{
+        const h = eqToHorizon(p[0], p[1], state.lat, lstH);
+        const pt = project(h.alt, h.az);
+        if(pt){ if(!started){ctx.moveTo(pt.x,pt.y);started=true;} else ctx.lineTo(pt.x,pt.y); }
+        else started=false;
+      });
+      ctx.stroke();
+    }
+  });
+  ctx.restore();
+}
+
+function drawDust(lstH, tsec){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,radius,0,Math.PI*2); ctx.clip();
+  for(const d of dust){
+    const h = eqToHorizon(d.ra, d.dec, state.lat, lstH);
+    if(h.alt < 0) continue;
+    const pt = project(h.alt, h.az);
+    if(!pt) continue;
+    const tw = 0.5 + 0.5*Math.sin(tsec*d.tws + d.tw);
+    const a = (0.5 - (d.mag-4.5)*0.18) * tw * state.bright;
+    if(a<=0.02) continue;
+    ctx.fillStyle = `rgba(230,235,255,${Math.min(0.7,a)})`;
+    ctx.fillRect(pt.x, pt.y, 1.1, 1.1);
+  }
+  ctx.restore();
+}
+
+function drawConstellationLines(lstH){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,radius,0,Math.PI*2); ctx.clip();
+  ctx.strokeStyle = "rgba(120,160,255,0.32)";
+  ctx.lineWidth = 1;
+  for(const c of CONSTELLATIONS){
+    for(const seg of c.lines){
+      const a = STARS[IDX[seg[0]]], b = STARS[IDX[seg[1]]];
+      if(!a||!b) continue;
+      const ha = eqToHorizon(a.ra,a.dec,state.lat,lstH);
+      const hb = eqToHorizon(b.ra,b.dec,state.lat,lstH);
+      if(ha.alt < 0 && hb.alt < 0) continue;
+      const pa = project(ha.alt, ha.az), pb = project(hb.alt, hb.az);
+      if(!pa||!pb) continue;
+      ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(pb.x,pb.y); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function drawConstellationNames(lstH){
+  ctx.save();
+  // ラベルが円の縁で切れないよう、少し広めにクリップ
+  ctx.beginPath(); ctx.arc(cx,cy,radius+34,0,Math.PI*2); ctx.clip();
+  ctx.font = Math.round(12*LBL) + "px -apple-system, 'Hiragino Sans', sans-serif";
+  ctx.fillStyle = "rgba(150,180,255,0.55)";
+  ctx.textAlign = "center";
+  for(const l of CONST_LABELS){
+    const s = STARS[IDX[l.k]]; if(!s) continue;
+    const h = eqToHorizon(s.ra,s.dec,state.lat,lstH);
+    if(h.alt < 3) continue;
+    const pt = project(h.alt,h.az); if(!pt) continue;
+    ctx.fillText(l.t, pt.x, pt.y - 12);
+  }
+  ctx.restore();
+}
+
+function drawStars(lstH, tsec){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,radius+34,0,Math.PI*2); ctx.clip();
+  ctx.textAlign = "left";
+  ctx.font = Math.round(11*LBL) + "px -apple-system, 'Hiragino Sans', sans-serif";
+  // 小さい画面では特に明るい星だけ名前を出して重なりを防ぐ
+  const nameLimit = IS_SMALL ? 1.0 : 1.7;
+  for(const s of STARS){
+    const h = eqToHorizon(s.ra, s.dec, state.lat, lstH);
+    if(h.alt < 0) continue;
+    const pt = project(h.alt, h.az); if(!pt) continue;
+    const tw = 0.75 + 0.25*Math.sin(tsec*s._tws + s._tw);
+    let r = magToRadius(s.mag) * (0.5 + 0.5*state.bright);
+    const col = starColor(s.mag);
+    // グロー
+    const glow = ctx.createRadialGradient(pt.x,pt.y,0, pt.x,pt.y, r*4.5);
+    glow.addColorStop(0, `rgba(255,255,255,${0.5*tw*state.bright})`);
+    glow.addColorStop(0.3, `rgba(200,215,255,${0.18*tw*state.bright})`);
+    glow.addColorStop(1, "rgba(200,215,255,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(pt.x,pt.y, r*4.5, 0, Math.PI*2); ctx.fill();
+    // コア
+    ctx.fillStyle = col;
+    ctx.globalAlpha = Math.min(1, tw*state.bright);
+    ctx.beginPath(); ctx.arc(pt.x,pt.y, r, 0, Math.PI*2); ctx.fill();
+    // 明るい星に十字の輝き
+    if(s.mag < 1.2){
+      ctx.strokeStyle = `rgba(255,255,255,${0.35*tw})`;
+      ctx.lineWidth = 0.8;
+      const sp = r*3.5;
+      ctx.beginPath();
+      ctx.moveTo(pt.x-sp,pt.y); ctx.lineTo(pt.x+sp,pt.y);
+      ctx.moveTo(pt.x,pt.y-sp); ctx.lineTo(pt.x,pt.y+sp);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // 固有名（1.6等より明るい星）
+    if(state.show.starnames && s.name && s.mag < nameLimit){
+      ctx.fillStyle = "rgba(255,240,200,0.7)";
+      ctx.fillText(s.name, pt.x + r + 4, pt.y + 3);
+    }
+  }
+  ctx.restore();
+}
+
+function drawMeteors(){
+  ctx.save();
+  ctx.lineCap = "round";
+  for(const m of meteors){
+    const t = m.life/m.maxLife;
+    const alpha = Math.sin(Math.min(1,t*1.2)*Math.PI) * 0.9;
+    const tailX = m.x - m.vx*(m.len/9);
+    const tailY = m.y - m.vy*(m.len/9);
+    const grad = ctx.createLinearGradient(m.x,m.y, tailX,tailY);
+    grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    grad.addColorStop(0.4, `rgba(190,210,255,${alpha*0.5})`);
+    grad.addColorStop(1, "rgba(190,210,255,0)");
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = m.w;
+    ctx.beginPath(); ctx.moveTo(m.x,m.y); ctx.lineTo(tailX,tailY); ctx.stroke();
+    // 先端の光点
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.beginPath(); ctx.arc(m.x,m.y, m.w*0.9, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawHorizon(){
+  // 地平線の円
+  ctx.save();
+  ctx.strokeStyle = "rgba(120,150,220,0.25)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx,cy,radius,0,Math.PI*2); ctx.stroke();
+  if(state.show.ground){
+    // 地平線の外側をうっすら地面色に
+    ctx.beginPath();
+    ctx.rect(0,0,W,H);
+    ctx.arc(cx,cy,radius,0,Math.PI*2, true);
+    ctx.fillStyle = "rgba(6,10,20,0.9)";
+    ctx.fill("evenodd");
+  }
+  ctx.restore();
+}
+
+function drawCardinal(){
+  ctx.save();
+  ctx.font = "600 15px -apple-system, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const dirs = [["北",0],["東",90],["南",180],["西",270]];
+  for(const [t,az] of dirs){
+    const a = az*D2R;
+    const x = cx - (radius+0)*Math.sin(a);
+    const y = cy - (radius+0)*Math.cos(a);
+    // 少し内側にラベル
+    const lx = cx - (radius-18)*Math.sin(a);
+    const ly = cy - (radius-18)*Math.cos(a);
+    ctx.fillStyle = "rgba(160,190,255,0.75)";
+    ctx.fillText(t, lx, ly);
+  }
+  ctx.restore();
+}
+
+// ============================================================
+//  メインループ
+// ============================================================
+let lastT = performance.now();
+let meteorTimer = 0;
+
+function frame(now){
+  const dt = Math.min(100, now - lastT); lastT = now;
+  const tsec = now/1000;
+
+  // 時間を進める
+  const mult = SPEEDS[state.speedIdx].mult;
+  if(mult>0) state.simOffset += dt*mult;
+  else if(mult===1) {} // 実時間は baseTime 側で追従
+  // 実時間モードでも常に現在時刻に追従させたい場合
+  if(state.speedIdx===1){ state.baseTime = Date.now() - state.simOffset; }
+
+  const date = currentDate();
+  const lstH = lstHours(date, state.lon);
+
+  drawBackground();
+  if(state.show.milkyway) drawMilkyway(lstH);
+  drawDust(lstH, tsec);
+  if(state.show.lines) drawConstellationLines(lstH);
+  drawStars(lstH, tsec);
+  if(state.show.names) drawConstellationNames(lstH);
+  drawHorizon();
+  if(state.show.cardinal) drawCardinal();
+
+  // 流れ星
+  if(state.show.meteors){
+    meteorTimer -= dt;
+    if(meteorTimer <= 0){
+      spawnMeteor();
+      meteorTimer = 1500 + Math.random()*4500;   // 1.5〜6秒ごと
+    }
+    for(let i=meteors.length-1;i>=0;i--){
+      const m = meteors[i];
+      m.x += m.vx*(dt/16); m.y += m.vy*(dt/16); m.life += dt/16;
+      const dist = Math.hypot(m.x-cx, m.y-cy);
+      if(m.life > m.maxLife || dist > radius*1.2) meteors.splice(i,1);
+    }
+    drawMeteors();
+  }
+
+  updateClock(date);
+  requestAnimationFrame(frame);
+}
+
+// ============================================================
+//  ヒーリング音楽（Web Audio APIで自動生成する無限アンビエント）
+//  外部ファイル不要。静かなパッド＋やさしい鈴の音が流れ続ける。
+// ============================================================
+const Music = (function(){
+  let ctx=null, master=null, reverb=null;
+  let padGain=null, padNodes=[], chimeTimer=null, chordTimer=null;
+  let playing=false, volume=0.55;
+
+  // Cメジャー・ペンタトニック（癒やし系）: やわらかい音の粒に使う音域
+  // 耳につく最高音域はカットして、中音域中心のまろやかな響きに
+  const PENTA = [
+    392.00, 440.00,                          // G4 A4
+    523.25, 587.33, 659.25, 783.99, 880.00,  // C5 D5 E5 G5 A5
+    1046.50, 1174.66                          // C6 D6（たまに高めのアクセント）
+  ];
+  // ゆっくり移り変わるパッドの和音（低音）
+  const CHORDS = [
+    [130.81, 196.00, 261.63, 329.63],  // Cadd (C3 G3 C4 E4)
+    [146.83, 220.00, 293.66, 349.23],  // Dm7  (D3 A3 D4 F4)
+    [164.81, 246.94, 329.63, 392.00],  // Em   (E3 B3 E4 G4)
+    [174.61, 261.63, 349.23, 440.00]   // F    (F3 C4 F4 A4)
+  ];
+  let chordIdx = 0;
+
+  function makeReverb(){
+    const len = Math.floor(ctx.sampleRate * 3.4);
+    const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+    for(let ch=0; ch<2; ch++){
+      const d = buf.getChannelData(ch);
+      for(let i=0;i<len;i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 2.6);
+    }
+    const conv = ctx.createConvolver();
+    conv.buffer = buf;
+    return conv;
+  }
+
+  function init(){
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain();
+    master.gain.value = 0;
+    master.connect(ctx.destination);
+    reverb = makeReverb();
+    const rvGain = ctx.createGain();
+    rvGain.gain.value = 0.9;
+    reverb.connect(rvGain).connect(master);
+    Music._rv = reverb;
+  }
+
+  // やわらかい音の粒（遠くでふわっと響く）
+  function playChime(){
+    if(!playing) return;
+    const now = ctx.currentTime;
+    const freq = PENTA[Math.floor(Math.random()*PENTA.length)];
+
+    // エンベロープ：ゆっくり立ち上げて長く余韻を残す（「ピン」ではなく「ふわ〜ん」）
+    const voice = ctx.createGain();
+    voice.gain.setValueAtTime(0.0001, now);
+    voice.gain.linearRampToValueAtTime(0.09, now + 0.30);       // やわらかな立ち上がり
+    voice.gain.exponentialRampToValueAtTime(0.0004, now + 6.5); // 長い余韻
+
+    // ローパスで耳につく高音を丸める
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = Math.min(freq * 2.4, 2000);
+    lp.Q.value = 0.3;
+
+    // わずかにずらした2つのサイン波＋オクターブ下の芯で、丸く温かく
+    const o1 = ctx.createOscillator(); o1.type = "sine"; o1.frequency.value = freq; o1.detune.value = -4;
+    const o2 = ctx.createOscillator(); o2.type = "sine"; o2.frequency.value = freq; o2.detune.value = +5;
+    const o3 = ctx.createOscillator(); o3.type = "sine"; o3.frequency.value = freq / 2;
+    const g3 = ctx.createGain(); g3.gain.value = 0.35;
+
+    o1.connect(lp); o2.connect(lp); o3.connect(g3).connect(lp);
+    lp.connect(voice);
+
+    const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    let out = voice;
+    if(pan){ pan.pan.value = Math.random()*1.4 - 0.7; voice.connect(pan); out = pan; }
+
+    // ドライは控えめ、残響はたっぷり → 遠くで響く質感
+    const dry = ctx.createGain(); dry.gain.value = 0.5;
+    out.connect(dry).connect(master);
+    out.connect(reverb);
+
+    [o1, o2, o3].forEach(o=>{ o.start(now); o.stop(now + 6.6); });
+
+    // 次の一音を予約（4〜9秒後、ゆったり）
+    chimeTimer = setTimeout(playChime, 4000 + Math.random()*5000);
+  }
+
+  // パッドの和音を鳴らす／差し替える
+  function setChord(freqs, glideT){
+    const now = ctx.currentTime;
+    padNodes.forEach(n=>{
+      try{ n.o.frequency.setTargetAtTime(0, now, 0.1); }catch(e){}
+    });
+    // 既存を止めて作り直す（クロスフェード）
+    const oldNodes = padNodes; padNodes = [];
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 900;
+    filter.Q.value = 0.4;
+    filter.connect(padGain);
+    freqs.forEach(f=>{
+      const o = ctx.createOscillator();
+      o.type = "sine";
+      o.frequency.value = f;
+      o.detune.value = Math.random()*8 - 4;
+      const og = ctx.createGain();
+      og.gain.value = 0;
+      og.gain.setTargetAtTime(0.22, now, 1.6);
+      // ゆっくりした揺らぎ
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 0.04 + Math.random()*0.07;
+      const lfoG = ctx.createGain();
+      lfoG.gain.value = 0.09;
+      lfo.connect(lfoG).connect(og.gain);
+      o.connect(og).connect(filter);
+      o.start(); lfo.start();
+      padNodes.push({o, og, lfo});
+    });
+    // 古い音をフェードアウトして停止
+    oldNodes.forEach(n=>{
+      try{
+        n.og.gain.setTargetAtTime(0, now, 1.4);
+        n.o.stop(now + 4); n.lfo.stop(now + 4);
+      }catch(e){}
+    });
+  }
+
+  function nextChord(){
+    if(!playing) return;
+    chordIdx = (chordIdx + 1) % CHORDS.length;
+    setChord(CHORDS[chordIdx]);
+    chordTimer = setTimeout(nextChord, 18000 + Math.random()*12000); // 18〜30秒ごと
+  }
+
+  function start(){
+    padGain = ctx.createGain();
+    padGain.gain.value = 0.9;
+    padGain.connect(master);
+    padGain.connect(reverb);
+    playing = true;
+    chordIdx = 0;
+    setChord(CHORDS[0]);
+    master.gain.cancelScheduledValues(ctx.currentTime);
+    master.gain.setTargetAtTime(volume, ctx.currentTime, 2.0); // ふわっとフェードイン
+    chimeTimer = setTimeout(playChime, 1500);
+    chordTimer = setTimeout(nextChord, 20000);
+  }
+
+  function stop(){
+    playing = false;
+    clearTimeout(chimeTimer); clearTimeout(chordTimer);
+    const now = ctx.currentTime;
+    master.gain.setTargetAtTime(0, now, 1.2); // フェードアウト
+    padNodes.forEach(n=>{
+      try{ n.og.gain.setTargetAtTime(0, now, 1.0); n.o.stop(now+3); n.lfo.stop(now+3); }catch(e){}
+    });
+    padNodes = [];
+  }
+
+  return {
+    async toggle(){
+      if(!ctx) init();
+      if(ctx.state === "suspended") await ctx.resume();
+      if(!playing) start(); else stop();
+      return playing;
+    },
+    setVolume(v){
+      volume = v;
+      if(master && playing) master.gain.setTargetAtTime(volume, ctx.currentTime, 0.2);
+    },
+    isPlaying(){ return playing; }
+  };
+})();
+window.Music = Music;
+
+// ============================================================
+//  UI
+// ============================================================
+const locSel = document.getElementById("location");
+LOCATIONS.forEach((l,i)=>{
+  const o = document.createElement("option");
+  o.value = i; o.textContent = l.n; locSel.appendChild(o);
+});
+const latInp = document.getElementById("lat");
+const lonInp = document.getElementById("lon");
+latInp.value = state.lat; lonInp.value = state.lon;
+
+locSel.addEventListener("change", ()=>{
+  const l = LOCATIONS[+locSel.value];
+  state.lat = l.lat; state.lon = l.lon;
+  latInp.value = l.lat; lonInp.value = l.lon;
+});
+latInp.addEventListener("input", ()=>{ state.lat = clampNum(+latInp.value,-90,90); });
+lonInp.addEventListener("input", ()=>{ state.lon = clampNum(+lonInp.value,-180,180); });
+function clampNum(v,a,b){ if(isNaN(v)) return 0; return Math.max(a,Math.min(b,v)); }
+
+const speedRange = document.getElementById("speed");
+const speedVal = document.getElementById("speedVal");
+speedRange.addEventListener("input", ()=>{
+  state.speedIdx = +speedRange.value;
+  speedVal.textContent = SPEEDS[state.speedIdx].label;
+  if(state.speedIdx<=1){ state.baseTime = Date.now(); state.simOffset = 0; }
+});
+
+const brightRange = document.getElementById("bright");
+const brightVal = document.getElementById("brightVal");
+brightRange.addEventListener("input", ()=>{
+  state.bright = +brightRange.value/100;
+  brightVal.textContent = brightRange.value + "%";
+});
+
+// 音楽
+const musicToggle = document.getElementById("musicToggle");
+const musicState = document.getElementById("musicState");
+const volume = document.getElementById("volume");
+const volVal = document.getElementById("volVal");
+musicToggle.addEventListener("click", async ()=>{
+  const on = await Music.toggle();
+  musicToggle.classList.toggle("on", on);
+  musicToggle.textContent = on ? "♪ 再生中（停止）" : "♪ 音楽を再生";
+  musicState.textContent = on ? "再生中" : "オフ";
+});
+Music.setVolume(+volume.value/100);
+volume.addEventListener("input", ()=>{
+  Music.setVolume(+volume.value/100);
+  volVal.textContent = volume.value + "%";
+});
+
+document.querySelectorAll(".toggle[data-t]").forEach(el=>{
+  el.addEventListener("click", ()=>{
+    const t = el.dataset.t;
+    state.show[t] = !state.show[t];
+    el.classList.toggle("on", state.show[t]);
+  });
+});
+
+const fsBtn = document.getElementById("fsBtn");
+fsBtn.addEventListener("click", toggleFullscreen);
+function toggleFullscreen(){
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  const cur = document.fullscreenElement || document.webkitFullscreenElement;
+  if(!req){
+    // iOS Safari は全画面API非対応
+    toast(IS_STANDALONE
+      ? "すでに全画面で起動しています"
+      : "iPhone / iPad では、共有ボタン →「ホーム画面に追加」から起動すると全画面になります");
+    return;
+  }
+  try{
+    if(!cur){ const p = req.call(el); if(p && p.catch) p.catch(()=>{}); }
+    else if(exit){ exit.call(document); }
+  }catch(e){ /* 失敗しても表示は継続 */ }
+}
+
+// 一時メッセージ
+let toastTimer = null;
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove("show"), 4500);
+}
+
+// 時計表示
+const clockEl = document.getElementById("clock");
+function updateClock(date){
+  const w = ["日","月","火","水","木","金","土"][date.getDay()];
+  const p2 = n=>String(n).padStart(2,"0");
+  const dstr = `${date.getFullYear()}/${p2(date.getMonth()+1)}/${p2(date.getDate())}（${w}）`;
+  const tstr = `${p2(date.getHours())}:${p2(date.getMinutes())}:${p2(date.getSeconds())}`;
+  const loc = LOCATIONS[+locSel.value] ? LOCATIONS[+locSel.value].n : "";
+  clockEl.innerHTML = `${dstr}<br><span style="font-size:18px">${tstr}</span>　${loc}`;
+}
+
+// パネル自動非表示
+let hideTimer = null;
+function showUI(){
+  document.body.classList.add("ui-visible");
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(()=>{ document.body.classList.remove("ui-visible"); }, 3500);
+}
+window.addEventListener("mousemove", showUI);
+window.addEventListener("click", showUI);
+window.addEventListener("touchstart", showUI, {passive:true});
+showUI();
+
+// スマホ向けの文言調整
+if(IS_TOUCH){
+  document.querySelector(".hint").innerHTML =
+    IS_STANDALONE ? "画面をタップするとパネルが出ます"
+                  : "画面をタップするとパネルが出ます<br>数秒で自動的に隠れます";
+  if(!FS_SUPPORTED && !IS_STANDALONE){
+    fsBtn.textContent = "📱 全画面にするには";
+  } else if(IS_STANDALONE){
+    fsBtn.style.display = "none";   // すでに全画面
+  }
+}
+
+// キーボード
+window.addEventListener("keydown", e=>{
+  if(e.key==="h"||e.key==="H"){
+    document.body.classList.toggle("ui-visible");
+    if(document.body.classList.contains("ui-visible")) showUI();
+  }
+  if(e.key==="f"||e.key==="F"){ toggleFullscreen(); }
+});
+
+// スタート
+requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>
