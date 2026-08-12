@@ -27,6 +27,15 @@ https://kuuuu33.github.io/planetarium/
 接頭辞がないと他の作品のセーブデータを壊します。
 詳細は [まとめサイトの README](https://github.com/kuuuu33/kuuuu33.github.io#-新しい作品を作るときのルール保存キーに接頭辞をつける) を参照。
 
+## ライセンス
+
+**Copyright (c) 2026 kuuuu33. All Rights Reserved.**
+
+閲覧・個人利用・URLの共有は自由です。
+複製・改変・再配布・ミラー公開・自作としての公開・商用利用は、事前の許諾なく行うことを禁じます。
+
+詳細は [LICENSE](LICENSE) を参照してください。
+
 ## 更新のしかた
 
 GitHubのWeb画面から `index.html` をアップロードして上書き（Add file → Upload files → Commit changes）。
