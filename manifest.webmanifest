@@ -1,0 +1,17 @@
+{
+  "name": "プラネタリウム",
+  "short_name": "プラネタリウム",
+  "description": "その時刻に見えている空を、まるごと一枚に描く星図。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#02030a",
+  "theme_color": "#02030a",
+  "lang": "ja",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
